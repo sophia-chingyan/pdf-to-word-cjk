@@ -3,11 +3,12 @@
 {% block content %}
 <section class="card">
   <h2>上傳 PDF</h2>
-  <label class="drop" id="drop">
+  <label class="drop" id="drop" data-max-bytes="{{ max_mb * 1024 * 1024 }}">
     <input type="file" id="file-input" accept=".pdf,application/pdf" multiple>
     <span><strong>拖放 PDF 到這裡</strong>，或點一下選擇檔案</span>
     <span class="muted">每個檔案最多 {{ max_mb }} MB、{{ max_pages }} 頁 · 僅支援可選取文字的 PDF</span>
   </label>
+  <div id="uploads" aria-live="polite"></div>
 </section>
 
 <section class="card" id="settings-card" hidden>

@@ -166,16 +166,70 @@ function initConvertPage() {
   setInterval(() => { if (!document.hidden) refresh().catch(() => {}); }, 2000);
 }
 
-async function uploadOne(file) {
-  if (!file.name.toLowerCase().endsWith(".pdf")) { toast(`${file.name}：只接受 PDF 檔案。`); return; }
-  if (file.size > 40 * 1024 * 1024) { toast(`${file.name}：檔案超過 40 MB 上限。`); return; }
+/* The server only creates a job once the whole file has arrived, so while a file is
+   on its way it exists only here. Show a row per upload, with progress and any error. */
+let uploadsInFlight = 0;
+window.addEventListener("beforeunload", (e) => { if (uploadsInFlight) e.preventDefault(); });
+
+function uploadRow(file) {
+  const el = document.createElement("div");
+  el.className = "job";
+  el.innerHTML = `<div class="job-head"><span class="job-name">${esc(file.name)}</span><span class="status"></span></div>
+    <div class="bar"><div style="width:0%"></div></div>
+    <div class="error" hidden></div>
+    <div class="actions"><button type="button" class="btn small">取消</button></div>`;
+  $("uploads").append(el);
+  const status = el.querySelector(".status"), bar = el.querySelector(".bar"), fill = bar.firstElementChild;
+  const err = el.querySelector(".error"), btn = el.querySelector("button");
+  return {
+    button: btn,
+    remove: () => el.remove(),
+    progress(loaded, total) {
+      const pct = total ? Math.min(100, Math.floor((100 * loaded) / total)) : 0;
+      fill.style.width = pct + "%";
+      status.textContent = `上傳中 ${pct}% · ${fmtSize(loaded)} / ${fmtSize(total)}`;
+    },
+    processing() { fill.style.width = "100%"; status.textContent = "處理中…"; btn.hidden = true; },
+    fail(msg) {
+      status.textContent = "上傳失敗"; status.classList.add("failed");
+      bar.hidden = true; err.textContent = msg; err.hidden = false;
+      btn.hidden = false; btn.textContent = "關閉";
+    },
+  };
+}
+
+function uploadOne(file) {
+  const row = uploadRow(file);
+  let xhr = null;
+  row.progress(0, file.size);
+  row.button.addEventListener("click", () => (xhr && xhr.readyState !== 4 ? xhr.abort() : row.remove()));
+  const maxBytes = Number($("drop").dataset.maxBytes) || 40 * 1024 * 1024;
+  if (!file.name.toLowerCase().endsWith(".pdf")) return row.fail("只接受 PDF 檔案。");
+  if (file.size > maxBytes) return row.fail(`檔案超過 ${Math.round(maxBytes / 1048576)} MB 上限。`);
+
+  xhr = new XMLHttpRequest();
+  uploadsInFlight++;
+  const finish = () => { uploadsInFlight--; };
+  xhr.upload.onprogress = (e) => { if (e.lengthComputable) row.progress(e.loaded, e.total); };
+  xhr.upload.onload = () => row.processing();
+  xhr.onload = async () => {
+    finish();
+    if (xhr.status === 401) { location.href = "/login"; return; }
+    if (xhr.status >= 200 && xhr.status < 300) {
+      await refresh().catch(() => {});  // the file is listed before its progress row goes away
+      row.remove();
+      return;
+    }
+    let detail = "";
+    try { detail = JSON.parse(xhr.responseText).detail; } catch (e) { /* not JSON */ }
+    row.fail(typeof detail === "string" && detail ? detail : "發生錯誤，請再試一次。");
+  };
+  xhr.onerror = () => { finish(); row.fail("網路中斷，請再試一次。"); };
+  xhr.onabort = () => { finish(); row.remove(); };
   const fd = new FormData();
   fd.append("file", file);
-  toast(`上傳中：${file.name}`);
-  try {
-    await api("/api/upload", { method: "POST", body: fd });
-  } catch (e) { return; }
-  refresh();
+  xhr.open("POST", "/api/upload");
+  xhr.send(fd);
 }
 
 /* ── Library page ─────────────────────────────────────────────── */
