@@ -14,6 +14,7 @@ from pathlib import Path
 import pymupdf
 
 from . import furigana
+from .cmaps import fix_unicode_cmaps
 from .extract import build_lines, page_chars
 from .layout import BULLETS, NUMBERED, group_blocks, reading_order, split_paragraphs
 from .model import Line
@@ -43,6 +44,7 @@ def open_pdf(path: str | Path, password: str | None = None):
     if doc.needs_pass:
         if not password or not doc.authenticate(password):
             raise ConversionError("needs_password")
+    fix_unicode_cmaps(doc)
     return doc
 
 
