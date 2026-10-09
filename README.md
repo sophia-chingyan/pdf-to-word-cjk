@@ -28,18 +28,21 @@ both horizontal and vertical (直排 / 縦書き) layouts. It runs as one servic
 `engine/` reads characters, positions and fonts straight from the PDF with PyMuPDF and writes
 Word XML with python-docx.
 
-1. **Rebuild lines and columns.** PDF tools usually store vertical text as many tiny horizontal
+1. **Fix Unicode-encoded fonts.** Fonts with a Unicode CMap encoding (UniGB/UniCNS/UniJIS/UniKS/UniAKR,
+   UCS-2, UTF-8, UTF-16 or UTF-32, as ReportLab and other generators write them) are read as the
+   Unicode they contain, even when the font's character collection doesn't match the encoding.
+2. **Rebuild lines and columns.** PDF tools usually store vertical text as many tiny horizontal
    fragments, so columns are rebuilt from where the characters sit. Sideways Latin letters and
    digits inside vertical text are kept in their column.
-2. **Furigana.** Small kana right beside Kanji (above it in horizontal text, to its right in
+3. **Furigana.** Small kana right beside Kanji (above it in horizontal text, to its right in
    vertical text) is attached to that Kanji and written as `漢字(かんじ)`, or dropped.
-3. **Blocks, paragraphs, reading order.** Lines of the same size and direction become blocks;
+4. **Blocks, paragraphs, reading order.** Lines of the same size and direction become blocks;
    indents and short last lines split paragraphs. A recursive XY-cut orders the blocks: columns
    left to right on horizontal pages, right to left on vertical pages. A paragraph that runs on
    into the next column or page is joined back together.
-4. **Structure.** Headings come from font size (up to 3 levels), bullet lists are detected,
+5. **Structure.** Headings come from font size (up to 3 levels), bullet lists are detected,
    ruled tables become Word tables, and images are placed in reading order. Page numbers are left out.
-5. **Word output.** Vertical pages become a Word section with text direction `tbRl`. A vertical
+6. **Word output.** Vertical pages become a Word section with text direction `tbRl`. A vertical
    block on a horizontal page goes into a borderless one-cell table with vertical text, so it
    stays editable without floating text boxes. Each run gets an East Asian font and language tag:
    PMingLiU / Microsoft JhengHei (zh-TW), SimSun / Microsoft YaHei (zh-CN), Yu Mincho / Yu Gothic

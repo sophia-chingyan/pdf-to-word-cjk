@@ -8,8 +8,11 @@ from where the characters actually sit, not from the line metadata.
 
 from __future__ import annotations
 
+import unicodedata
+
 import pymupdf
 
+from .cmaps import needs_cid_text
 from .model import Char, Line
 
 
@@ -20,6 +23,8 @@ def page_chars(page) -> list[list[Char]]:
     inside vertical text) are marked so columns can take them in.
     """
     flags = pymupdf.TEXT_PRESERVE_WHITESPACE | pymupdf.TEXT_PRESERVE_LIGATURES | pymupdf.TEXT_MEDIABOX_CLIP
+    if needs_cid_text(page):
+        flags |= pymupdf.TEXT_CID_FOR_UNKNOWN_UNICODE
     raw = page.get_text("rawdict", flags=flags)
     fragments: list[list[Char]] = []
     for block in raw["blocks"]:
@@ -40,7 +45,11 @@ def page_chars(page) -> list[list[Char]]:
                         x0 = x1 - 0.9 * (y1 - y0)
                     elif y1 - y0 < 0.2 * (x1 - x0):
                         y0 = y1 - 0.9 * (x1 - x0)
-                    chars.append(Char(ch["c"], x0, y0, x1, y1, span["size"], span["font"], bold, rotated))
+                    # Fonts in vertical writing mode (Identity-V, Uni*-V) give
+                    # every glyph a vertical direction; only narrow ones
+                    # (Latin, digits) are actually turned sideways.
+                    sideways = rotated and unicodedata.east_asian_width(ch["c"][:1] or " ") not in "WF"
+                    chars.append(Char(ch["c"], x0, y0, x1, y1, span["size"], span["font"], bold, sideways))
             if chars:
                 fragments.append(chars)
     return fragments

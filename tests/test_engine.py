@@ -1,7 +1,9 @@
+import pymupdf
+import pytest
 from docx import Document
 from docx.oxml.ns import qn
 
-from engine.convert import convert
+from engine.convert import convert, open_pdf
 from engine.options import Options
 
 W_TD = qn("w:textDirection")
@@ -103,31 +105,77 @@ def test_pause_resume_reuses_finished_pages(samples, tmp_path):
     assert (tmp_path / "a.docx").exists()
 
 
-def test_unicode_cmap_font_without_to_unicode(tmp_path):
-    """ReportLab pairs MSung-Light (CNS1) with UniGB-UCS2-H and writes the
-    text as UCS-2; without a fix every character extracts as a wrong one."""
-    import pymupdf
 
-    text = "小我：人類的現狀"
+def unicode_cmap_pdf(path, encoding, ordering, lines, codec, vertical=False):
+    """A page in a non-embedded CID font with a Unicode CMap encoding, the way
+    ReportLab and other generators write it (often with a mismatched font)."""
     pdf = pymupdf.open()
     page = pdf.new_page()
     font = pdf.get_new_xref()
     pdf.update_object(font, (
-        "<< /Type /Font /Subtype /Type0 /BaseFont /MSung-Light /Encoding /UniGB-UCS2-H "
-        "/DescendantFonts [ << /Type /Font /Subtype /CIDFontType0 /BaseFont /MSung-Light "
-        "/CIDSystemInfo << /Registry (Adobe) /Ordering (CNS1) /Supplement 1 >> /DW 1000 "
-        "/FontDescriptor << /Type /FontDescriptor /FontName /MSung-Light /Flags 6 "
+        f"<< /Type /Font /Subtype /Type0 /BaseFont /F /Encoding /{encoding} "
+        "/DescendantFonts [ << /Type /Font /Subtype /CIDFontType0 /BaseFont /F "
+        f"/CIDSystemInfo << /Registry (Adobe) /Ordering ({ordering}) /Supplement 1 >> /DW 1000 "
+        "/W [ 1 [ 250 ] 34 [ 615 ] 67 [ 521 427 ] ] "
+        "/FontDescriptor << /Type /FontDescriptor /FontName /F /Flags 6 "
         "/FontBBox [ -160 -249 1015 888 ] /ItalicAngle 0 /Ascent 752 /Descent -271 "
         "/CapHeight 737 /StemV 58 >> >> ] >>"))
     pdf.xref_set_key(page.xref, "Resources", f"<< /Font << /F2 {font} 0 R >> >>")
+    ops = []
+    for i, line in enumerate(lines):
+        x, y = (500 - 18 * i, 760) if vertical else (72, 760 - 18 * i)
+        ops.append(f"BT /F2 12 Tf {x} {y} Td <{line.encode(codec).hex()}> Tj ET")
     contents = pdf.get_new_xref()
     pdf.update_object(contents, "<<>>")
-    pdf.update_stream(contents, f"BT /F2 12 Tf 72 720 Td <{text.encode('utf-16-be').hex()}> Tj ET".encode())
+    pdf.update_stream(contents, "\n".join(ops).encode())
     pdf.xref_set_key(page.xref, "Contents", f"{contents} 0 R")
-    src = tmp_path / "reportlab.pdf"
-    pdf.save(src)
+    pdf.save(path)
+    return path
 
-    out = tmp_path / "reportlab.docx"
+
+UNICODE_CMAP_CASES = [
+    # ReportLab: MSung-Light (CNS1) with UniGB-UCS2-H.
+    ("UniGB-UCS2-H", "CNS1", "utf-16-be", ["小我：人類的現狀，喬治·歐威爾⋯⋯"], "zh-TW"),
+    ("UniGB-UCS2-H", "GB1", "utf-16-be", ["这是简体中文的测试段落，检查转换是否正确。"], "zh-CN"),
+    ("UniCNS-UCS2-H", "CNS1", "utf-16-be", ["这是简体中文的测试段落，检查转换是否正确。"], "zh-CN"),
+    ("UniJIS-UCS2-H", "Japan1", "utf-16-be", ["これは日本語のテストです。カタカナと漢字。"], "ja-JP"),
+    ("UniGB-UCS2-H", "Japan1", "utf-16-be", ["これは日本語のテストです。カタカナと漢字。"], "ja-JP"),
+    ("UniKS-UCS2-H", "Korea1", "utf-16-be", ["이 문서는 한국어 테스트입니다."], "ko-KR"),
+    ("UniGB-UCS2-H", "Korea1", "utf-16-be", ["이 문서는 한국어 테스트입니다."], "ko-KR"),
+    ("UniJIS-UTF16-H", "Japan1", "utf-16-be", ["𠮷野家の漢字テスト。"], "ja-JP"),
+    ("UniJIS-UTF8-H", "Japan1", "utf-8", ["これは日本語のテストです。"], "ja-JP"),
+    ("UniKS-UTF8-H", "Korea1", "utf-8", ["이 문서는 한국어 테스트입니다."], "ko-KR"),
+    ("UniCNS-UTF32-H", "CNS1", "utf-32-be", ["繁體中文測試，這是一個段落。"], "zh-TW"),
+    ("UniAKR-UTF16-H", "Korea1", "utf-16-be", ["이 문서는 한국어 테스트입니다."], "ko-KR"),
+]
+
+
+@pytest.mark.parametrize("encoding,ordering,codec,lines,lang", UNICODE_CMAP_CASES)
+def test_unicode_cmap_fonts(tmp_path, encoding, ordering, codec, lines, lang):
+    src = unicode_cmap_pdf(tmp_path / "in.pdf", encoding, ordering, lines, codec)
+    out = tmp_path / "out.docx"
     summary = convert(src, out, Options.from_dict(None), tmp_path / "work")
-    assert text in "\n".join(body_text(Document(out)))
-    assert summary["languages"] == ["zh-TW"]
+    text = "\n".join(body_text(Document(out)))
+    for line in lines:
+        assert line in text
+    assert summary["languages"] == [lang]
+
+
+def test_unicode_cmap_keeps_latin_widths(tmp_path):
+    src = unicode_cmap_pdf(tmp_path / "in.pdf", "UniKS-UTF8-H", "CNS1", ["Abc 한"], "utf-8")
+    page = open_pdf(src)[0]
+    chars = [ch for b in page.get_text("rawdict", flags=pymupdf.TEXT_CID_FOR_UNKNOWN_UNICODE)["blocks"]
+             for ln in b["lines"] for sp in ln["spans"] for ch in sp["chars"]]
+    assert "".join(c["c"] for c in chars).replace("\xa0", " ") == "Abc 한"
+    # Widths 615, 521, 427, 250 from the font's W array, 12 pt.
+    assert [round(c["bbox"][2] - c["bbox"][0], 2) for c in chars] == [7.38, 6.25, 5.12, 3.0, 12.0]
+
+
+def test_unicode_cmap_vertical(tmp_path):
+    lines = ["吾輩は猫である。名前はまだ無い。", "どこで生れたかとんと見当がつかぬ。"]
+    src = unicode_cmap_pdf(tmp_path / "in.pdf", "UniJIS-UCS2-V", "GB1", lines, "utf-16-be", vertical=True)
+    out = tmp_path / "out.docx"
+    summary = convert(src, out, Options.from_dict(None), tmp_path / "work")
+    text = "".join(body_text(Document(out)))
+    assert "".join(lines) in text
+    assert summary["directions"] == ["v"]
