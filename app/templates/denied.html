@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block nav %}{% endblock %}
+{% block content %}
+<section class="card center">
+  <h1>無法使用</h1>
+  <p>{{ email or "這個帳號" }} 沒有使用權限。</p>
+  <a class="btn" href="/login">改用其他帳號</a>
+</section>
+{% endblock %}
