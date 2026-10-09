@@ -36,13 +36,18 @@ Word XML with python-docx.
    digits inside vertical text are kept in their column.
 3. **Furigana.** Small kana right beside Kanji (above it in horizontal text, to its right in
    vertical text) is attached to that Kanji and written as `漢字(かんじ)`, or dropped.
-4. **Blocks, paragraphs, reading order.** Lines of the same size and direction become blocks;
-   indents and short last lines split paragraphs. A recursive XY-cut orders the blocks: columns
-   left to right on horizontal pages, right to left on vertical pages. A paragraph that runs on
-   into the next column or page is joined back together.
+4. **Blocks, paragraphs, reading order.** Pieces of one printed line that the PDF stores apart
+   (wide gaps in justified text) are joined back; a real column gutter is left alone. Lines of the
+   same size and direction become blocks; indents and short last lines split paragraphs. In text
+   whose paragraphs open with an indent, a short line followed by an unindented one stays a line
+   break inside the paragraph. A recursive XY-cut orders the blocks: columns left to right on
+   horizontal pages, right to left on vertical pages. A paragraph that runs on into the next
+   column is joined back together; one that runs on into the next page stays one paragraph, with
+   a page break where the PDF page ends.
 5. **Structure.** Headings come from font size (up to 3 levels), bullet lists are detected,
    ruled tables become Word tables, and images are placed in reading order. Page numbers are left out.
-6. **Word output.** Vertical pages become a Word section with text direction `tbRl`. A vertical
+6. **Word output.** Every PDF page starts a new Word page, and the Word page uses the PDF's
+   margins, first-line indents and line spacing, so each page holds the same text. Vertical pages become a Word section with text direction `tbRl`. A vertical
    block on a horizontal page goes into a borderless one-cell table with vertical text, so it
    stays editable without floating text boxes. Each run gets an East Asian font and language tag:
    PMingLiU / Microsoft JhengHei (zh-TW), SimSun / Microsoft YaHei (zh-CN), Yu Mincho / Yu Gothic
