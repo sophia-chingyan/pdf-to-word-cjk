@@ -27,6 +27,7 @@ a { color: var(--accent); }
         border: 2px dashed var(--line); border-radius: 10px; cursor: pointer; }
 .drop.over { border-color: var(--accent); background: var(--accent-soft); }
 .drop input { display: none; }
+#uploads:not(:empty) { margin-top: 12px; }
 .picker { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 8px 0 12px; }
 .picker label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .field { font-weight: 600; }
