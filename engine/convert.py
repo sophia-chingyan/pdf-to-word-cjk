@@ -43,7 +43,51 @@ def open_pdf(path: str | Path, password: str | None = None):
     if doc.needs_pass:
         if not password or not doc.authenticate(password):
             raise ConversionError("needs_password")
+    fix_unicode_cmaps(doc)
     return doc
+
+
+UNICODE_CMAP = re.compile(r"Uni(GB|CNS|JIS|KS)-(UCS2|UTF16)-[HV]")
+
+
+def _identity_to_unicode() -> bytes:
+    ranges = [f"<{h:02X}00> <{h:02X}FF> <{h:02X}00>\n" for h in range(256)]
+    parts = [f"{len(ranges[i:i + 100])} beginbfrange\n{''.join(ranges[i:i + 100])}endbfrange\n"
+             for i in range(0, 256, 100)]
+    return ("/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n"
+            "/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n"
+            "/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n"
+            "1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n"
+            + "".join(parts)
+            + "endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n").encode()
+
+
+def fix_unicode_cmaps(doc) -> int:
+    """Read text in fonts encoded with a Unicode CMap as the Unicode it is.
+
+    With an encoding such as UniGB-UCS2-H the bytes in the PDF are UCS-2
+    code points. Without a ToUnicode map MuPDF turns them into CIDs of the
+    encoding's character collection and back into text through the font's
+    own collection; some producers (ReportLab with MSung-Light, for one)
+    pair UniGB with a CNS1 font, so every character comes out as a wrong,
+    unrelated Han character. An identity ToUnicode map gives the code
+    points back directly. Only the open document is changed, not the file.
+    """
+    fixed = set()
+    cmap_xref = 0
+    for page in doc:
+        for xref, _ext, kind, _name, _ref, encoding, *_ in page.get_fonts(full=True):
+            if xref in fixed or kind != "Type0" or not UNICODE_CMAP.fullmatch(encoding or ""):
+                continue
+            if doc.xref_get_key(xref, "ToUnicode")[0] != "null":
+                continue
+            if not cmap_xref:
+                cmap_xref = doc.get_new_xref()
+                doc.update_object(cmap_xref, "<<>>")
+                doc.update_stream(cmap_xref, _identity_to_unicode())
+            doc.xref_set_key(xref, "ToUnicode", f"{cmap_xref} 0 R")
+            fixed.add(xref)
+    return len(fixed)
 
 
 def _is_page_number(text: str) -> bool:

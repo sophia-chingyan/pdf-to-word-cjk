@@ -101,3 +101,33 @@ def test_pause_resume_reuses_finished_pages(samples, tmp_path):
     assert (work / "page_0001.json").exists() and not (work / "page_0002.json").exists()
     convert(samples["ja_vertical_long"], tmp_path / "a.docx", Options(), work)
     assert (tmp_path / "a.docx").exists()
+
+
+def test_unicode_cmap_font_without_to_unicode(tmp_path):
+    """ReportLab pairs MSung-Light (CNS1) with UniGB-UCS2-H and writes the
+    text as UCS-2; without a fix every character extracts as a wrong one."""
+    import pymupdf
+
+    text = "小我：人類的現狀"
+    pdf = pymupdf.open()
+    page = pdf.new_page()
+    font = pdf.get_new_xref()
+    pdf.update_object(font, (
+        "<< /Type /Font /Subtype /Type0 /BaseFont /MSung-Light /Encoding /UniGB-UCS2-H "
+        "/DescendantFonts [ << /Type /Font /Subtype /CIDFontType0 /BaseFont /MSung-Light "
+        "/CIDSystemInfo << /Registry (Adobe) /Ordering (CNS1) /Supplement 1 >> /DW 1000 "
+        "/FontDescriptor << /Type /FontDescriptor /FontName /MSung-Light /Flags 6 "
+        "/FontBBox [ -160 -249 1015 888 ] /ItalicAngle 0 /Ascent 752 /Descent -271 "
+        "/CapHeight 737 /StemV 58 >> >> ] >>"))
+    pdf.xref_set_key(page.xref, "Resources", f"<< /Font << /F2 {font} 0 R >> >>")
+    contents = pdf.get_new_xref()
+    pdf.update_object(contents, "<<>>")
+    pdf.update_stream(contents, f"BT /F2 12 Tf 72 720 Td <{text.encode('utf-16-be').hex()}> Tj ET".encode())
+    pdf.xref_set_key(page.xref, "Contents", f"{contents} 0 R")
+    src = tmp_path / "reportlab.pdf"
+    pdf.save(src)
+
+    out = tmp_path / "reportlab.docx"
+    summary = convert(src, out, Options.from_dict(None), tmp_path / "work")
+    assert text in "\n".join(body_text(Document(out)))
+    assert summary["languages"] == ["zh-TW"]
