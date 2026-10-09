@@ -56,22 +56,56 @@ def group_blocks(lines: list[Line]) -> list[Block]:
 
 def is_list_start(text: str) -> bool:
     t = text.lstrip(" 　")
+    if t[:1] in "-–—*":
+        # A dash is a bullet only before a space; "——" is a CJK dash in running text.
+        return t[1:2] in (" ", "\u3000")
     return bool(t) and (t[0] in BULLETS and len(t) > 1 or bool(NUMBERED.match(t)))
+
+
+def _edge(values: list[float], tol: float, low: bool) -> float:
+    """The block's margin on one side: the outermost value that two or more
+    lines share, so one hanging punctuation mark doesn't move it."""
+    ordered = sorted(values, reverse=not low)
+    for i, v in enumerate(ordered[:-1]):
+        if abs(ordered[i + 1] - v) <= tol:
+            return v
+    return ordered[0]
+
+
+def block_edges(block: Block) -> tuple[float, float]:
+    """Where the block's lines start and end along the reading direction."""
+    tol = 0.3 * block.size
+    if len(block.lines) < 3:
+        return min(ln.start for ln in block.lines), max(ln.end for ln in block.lines)
+    return (_edge([ln.start for ln in block.lines], tol, True),
+            _edge([ln.end for ln in block.lines], tol, False))
+
+
+def is_indented(ln: Line, b_start: float) -> bool:
+    return ln.start > b_start + 0.8 * ln.size or ln.text.startswith("　")
+
+
+def uses_indents(block: Block) -> bool:
+    """True when paragraphs in this block open with a first-line indent.
+    A short line followed by an unindented one is then a line break inside
+    the paragraph, not a new paragraph."""
+    b_start, _ = block_edges(block)
+    return any(is_indented(ln, b_start) and not is_list_start(ln.text) for ln in block.lines)
 
 
 def split_paragraphs(block: Block) -> list[list[Line]]:
     """Split a block into paragraphs using short last lines and indents."""
-    x0, y0, x1, y1 = block.bbox
-    b_start, b_end = (x0, x1) if block.dir == "h" else (y0, y1)
+    b_start, b_end = block_edges(block)
+    indents = uses_indents(block)
     paragraphs: list[list[Line]] = []
     for i, ln in enumerate(block.lines):
         s = ln.size
         new = i == 0
         if not new:
             prev = block.lines[i - 1]
-            if prev.end < b_end - 1.5 * s:
+            if prev.end < b_end - 1.5 * s and not indents:
                 new = True
-            elif ln.start > b_start + 0.8 * s or ln.text.startswith("　"):
+            elif is_indented(ln, b_start):
                 new = True
             elif is_list_start(ln.text):
                 new = True

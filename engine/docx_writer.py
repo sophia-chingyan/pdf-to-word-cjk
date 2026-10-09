@@ -1,5 +1,8 @@
 """Write the analysed pages as an editable Word document.
 
+Every PDF page starts a new Word page, with the PDF's margins, so each Word
+page holds the same text as its PDF page.
+
 Vertical pages become Word sections with text direction tbRl (top to
 bottom, columns right to left). A block whose direction differs from its
 page goes into a borderless one-cell table with its own text direction,
@@ -13,6 +16,7 @@ from pathlib import Path
 
 from docx import Document
 from docx.enum.section import WD_ORIENT, WD_SECTION
+from docx.enum.text import WD_BREAK, WD_LINE_SPACING
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
@@ -63,12 +67,44 @@ def _text_direction(section, value: str | None):
             sect.append(td)
 
 
-def _page_setup(section, page: dict, vertical: bool):
+def _page_key(page: dict) -> tuple:
+    return page["dir"], round(page["width"]), round(page["height"])
+
+
+def _margins(pages: list[dict]) -> dict[str, float]:
+    """Margins in points that fit the text area of these PDF pages.
+
+    Left and top follow the typical page. Right and bottom take the
+    smallest one seen: the widest line sets the text width, and a full PDF
+    page still fits on one Word page.
+    """
+    boxes = []
+    for p in pages:
+        rs = [r["bbox"] for r in p["regions"] if r["type"] in ("text", "table")]
+        if rs:
+            boxes.append((min(b[0] for b in rs), min(b[1] for b in rs),
+                          p["width"] - max(b[2] for b in rs), p["height"] - max(b[3] for b in rs)))
+    if not boxes:
+        return {side: MARGIN.pt for side in ("left", "top", "right", "bottom")}
+
+    def median(vals):
+        vals = sorted(vals)
+        return vals[len(vals) // 2]
+
+    lo, hi = Cm(0.5).pt, Cm(6).pt
+    lefts, tops, rights, bottoms = zip(*boxes)
+    left, top, right = median(lefts), median(tops), min(rights)
+    bottom = min(min(bottoms), MARGIN.pt)
+    return {side: max(lo, min(hi, v)) for side, v in
+            (("left", left), ("top", top), ("right", right), ("bottom", bottom))}
+
+
+def _page_setup(section, page: dict, vertical: bool, margins: dict[str, float]):
     w, h = page["width"], page["height"]
     section.orientation = WD_ORIENT.LANDSCAPE if w > h else WD_ORIENT.PORTRAIT
     section.page_width, section.page_height = Pt(w), Pt(h)
-    for side in ("left_margin", "right_margin", "top_margin", "bottom_margin"):
-        setattr(section, side, MARGIN)
+    for side, value in margins.items():
+        setattr(section, f"{side}_margin", Pt(value))
     _text_direction(section, "tbRl" if vertical else None)
 
 
@@ -115,6 +151,10 @@ def write_docx(pages: list[dict], options: Options, workdir: Path, out_path) -> 
     doc = Document()
     normal = doc.styles["Normal"]
     normal.font.size = Pt(body)
+    # The PDF's own line pitch is set on each paragraph; no extra space
+    # between paragraphs, as in typeset text.
+    normal.paragraph_format.space_before = Pt(0)
+    normal.paragraph_format.space_after = Pt(0)
     _set_east_asia(normal.element.get_or_add_rPr(), FONTS[doc_lang][0], doc_lang)
     for lvl in (1, 2, 3):
         st = doc.styles[f"Heading {lvl}"]
@@ -129,16 +169,41 @@ def write_docx(pages: list[dict], options: Options, workdir: Path, out_path) -> 
     # The last body paragraph written, while it may still continue in the
     # next column or page: (paragraph, size, direction).
     open_para = None
+    # True until the first paragraph of a new page is written; that
+    # paragraph then starts on a new Word page.
+    page_break = False
+    margins = {}
+
+    def new_paragraph():
+        nonlocal page_break
+        p = doc.add_paragraph()
+        if page_break:
+            p.paragraph_format.page_break_before = True
+            page_break = False
+        return p
+
+    def before_block():
+        # Word ignores "page break before" inside tables, so a table that
+        # opens a page gets an empty paragraph that carries the break.
+        if page_break:
+            new_paragraph()
+
     for page in pages:
         warnings.extend(page["warnings"])
         ruby_total += page.get("ruby", 0)
-        key = (page["dir"], round(page["width"]), round(page["height"]))
+        key = _page_key(page)
         if key != current:
             section = doc.sections[0] if first else doc.add_section(WD_SECTION.NEW_PAGE)
-            _page_setup(section, page, page["dir"] == "v")
+            if key not in margins:
+                margins[key] = _margins([p for p in pages if _page_key(p) == key])
+            _page_setup(section, page, page["dir"] == "v", margins[key])
             current = key
-            first = False
-        text_width = page["width"] - 2 * MARGIN.pt
+            page_break = False
+        else:
+            page_break = not first
+        first = False
+        m = margins[key]
+        text_width = page["width"] - m["left"] - m["right"]
         for region in page["regions"]:
             kind = region["type"]
             if kind != "text":
@@ -147,8 +212,9 @@ def write_docx(pages: list[dict], options: Options, workdir: Path, out_path) -> 
                 x0, y0, x1, y1 = region["bbox"]
                 path = workdir / region["file"]
                 if path.exists():
-                    doc.add_picture(str(path), width=Pt(min(x1 - x0, text_width)))
+                    new_paragraph().add_run().add_picture(str(path), width=Pt(min(x1 - x0, text_width)))
             elif kind == "table":
+                before_block()
                 rows = region["rows"]
                 ncols = max(len(r) for r in rows)
                 table = doc.add_table(rows=len(rows), cols=ncols)
@@ -166,6 +232,7 @@ def write_docx(pages: list[dict], options: Options, workdir: Path, out_path) -> 
                 font = FONTS[lang][1 if region.get("sans") else 0]
                 target = doc
                 if region["dir"] != page["dir"]:
+                    before_block()
                     x0, y0, x1, y1 = region["bbox"]
                     if region["dir"] == "v":
                         table, cell = _one_cell(doc, "tbRl", x1 - x0 + 12)
@@ -183,15 +250,28 @@ def write_docx(pages: list[dict], options: Options, workdir: Path, out_path) -> 
                 for para in region["paragraphs"]:
                     level = levels.get(round(para["size"] * 2) / 2) if para["chars"] <= 80 else None
                     plain = not level and not para["list"]
-                    if (target is doc and first_para and open_para and plain and not para.get("indent")
-                            and abs(open_para[1] - para["size"]) < 0.5 and open_para[2] == region["dir"]):
+                    joined = bool(target is doc and first_para and open_para and plain and not para.get("indent")
+                                  and abs(open_para[1] - para["size"]) < 0.5 and open_para[2] == region["dir"])
+                    if joined:
                         p = open_para[0]  # the paragraph runs on from the previous column or page
+                        if page_break:
+                            # Same paragraph, but its rest starts the next page.
+                            p.add_run().add_break(WD_BREAK.PAGE)
+                            page_break = False
                     elif target is doc:
-                        p = doc.add_paragraph()
+                        p = new_paragraph()
                     elif first_para:
                         p = target.paragraphs[0]
                     else:
                         p = target.add_paragraph()
+                    if not joined:
+                        fmt = p.paragraph_format
+                        pitch = region.get("pitch")
+                        if pitch and not level and pitch > para["size"]:
+                            fmt.line_spacing_rule = WD_LINE_SPACING.AT_LEAST
+                            fmt.line_spacing = Pt(pitch)
+                        if plain and para.get("indent_pt"):
+                            fmt.first_line_indent = Pt(para["indent_pt"])
                     first_para = False
                     runs = [list(r) for r in para["runs"]]
                     if level:
@@ -211,6 +291,8 @@ def write_docx(pages: list[dict], options: Options, workdir: Path, out_path) -> 
                         target is doc and plain and para.get("open_end")) else None
                 if target is not doc:
                     doc.add_paragraph()
+        if page_break:
+            new_paragraph()  # an empty PDF page stays an empty Word page
 
     doc.core_properties.title = Path(out_path).stem
     doc.save(str(out_path))

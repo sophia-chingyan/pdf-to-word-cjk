@@ -41,9 +41,9 @@ def page_chars(page) -> list[list[Char]]:
                         continue
                     # Some producers give vertical glyphs a zero-width box at
                     # the column's right edge; give it a square footprint.
-                    if x1 - x0 < 0.2 * (y1 - y0):
+                    if x1 - x0 < 0.05 * (y1 - y0):
                         x0 = x1 - 0.9 * (y1 - y0)
-                    elif y1 - y0 < 0.2 * (x1 - x0):
+                    elif y1 - y0 < 0.05 * (x1 - x0):
                         y0 = y1 - 0.9 * (x1 - x0)
                     # Fonts in vertical writing mode (Identity-V, Uni*-V) give
                     # every glyph a vertical direction; only narrow ones
@@ -67,6 +67,62 @@ def _classify(chars: list[Char]) -> str:
 
 def _similar(a: float, b: float) -> bool:
     return 0.8 <= a / b <= 1.25 if b else False
+
+
+def _same_row(a: Line, b: Line) -> bool:
+    h = min(a.y1 - a.y0, b.y1 - b.y0)
+    return h > 0 and min(a.y1, b.y1) - max(a.y0, b.y0) >= 0.6 * h and _similar(a.size, b.size)
+
+
+def _join_rows(lines: list[Line]) -> list[Line]:
+    """Join pieces of one printed line that MuPDF split at a wide gap.
+
+    Justified or badly spaced text can leave gaps of many characters inside
+    a line. A gap is joined over when, around it, more lines run across the
+    gap than stop at it; a real column gutter is empty on most rows.
+    """
+    lines = sorted(lines, key=lambda ln: (ln.y0, ln.x0))
+    rows: list[list[Line]] = []
+    for ln in lines:
+        for row in rows:
+            if _same_row(row[-1], ln):
+                row.append(ln)
+                break
+        else:
+            rows.append([ln])
+    for row in rows:
+        row.sort(key=lambda ln: ln.x0)
+
+    def crossed(row: list[Line], a: Line, b: Line) -> bool:
+        s = max(a.size, b.size)
+        if b.x0 - a.x1 <= 0.5 * s:
+            return True
+        mid = (a.x1 + b.x0) / 2
+        cy = (a.y0 + a.y1) / 2
+        across = stops = 0
+        for other in rows:
+            if other is row:
+                continue
+            o = other[0]
+            if abs((o.y0 + o.y1) / 2 - cy) > 12 * s or not _similar(o.size, s):
+                continue
+            if any(ln.x0 < mid < ln.x1 for ln in other):
+                across += 1
+            elif any(ln.x1 <= mid for ln in other) and any(ln.x0 >= mid for ln in other):
+                stops += 1
+        return across > stops
+
+    out: list[Line] = []
+    for row in rows:
+        cur = row[0]
+        for nxt in row[1:]:
+            if crossed(row, cur, nxt):
+                cur = Line(cur.chars + nxt.chars, "h")
+            else:
+                out.append(cur)
+                cur = nxt
+        out.append(cur)
+    return out
 
 
 def build_lines(fragments: list[list[Char]], forced: str | None = None) -> list[Line]:
@@ -110,7 +166,7 @@ def build_lines(fragments: list[list[Char]], forced: str | None = None) -> list[
             columns.append(best)
         best.extend(chars)
 
-    lines = list(horizontal)
+    lines = _join_rows(horizontal)
     singles: list[Char] = []
     for col in columns:
         if len([c for c in col if not c.c.isspace()]) >= 2:

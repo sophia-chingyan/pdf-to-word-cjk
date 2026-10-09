@@ -157,6 +157,40 @@ def _cjk_font_file() -> str:
     raise SystemExit("No CJK font found to build samples")
 
 
+def zh_tw_pages(path: Path):
+    """Three pages of an indented book, written line by line the way ReportLab
+    and other generators lay out text: one line broken into pieces with wide
+    gaps, a short line inside a paragraph, a comma hanging at a line start,
+    and a paragraph that runs on into the next page."""
+    font = _cjk_font_file()
+    pdf = pymupdf.open()
+    left, size, pitch = 77, 11, 18
+    full = "天地玄黃宇宙洪荒日月盈昃辰宿列張寒來暑往秋收冬藏閏餘成歲律呂調陽雲騰致雨露結為霜"  # 40 chars
+    pages = [
+        [  # (x, text) pieces per line
+            [(left + 2 * size, full[:38])],
+            [(left, "甲乙丙丁戊己"), (left + 16 * size, "庚辛壬癸"), (left + 32 * size, "子丑寅卯辰巳午未")],
+            [(left, "短行在這裡結束。")],
+            [(left - 4, ","), (left, full)],
+            [(left, full)],
+        ],
+        [
+            [(left, full[:20] + "第一頁的段落到此結束。")],
+            [(left + 2 * size, "第二頁的新段落。")],
+        ],
+        [
+            [(left + 2 * size, "第三頁的段落。")],
+        ],
+    ]
+    for lines in pages:
+        page = pdf.new_page()
+        page.insert_font(fontname="cjk", fontfile=font)
+        for i, pieces in enumerate(lines):
+            for x, text in pieces:
+                page.insert_text((x, 72 + i * pitch), text, fontname="cjk", fontsize=size)
+    pdf.save(path.with_suffix(".pdf"))
+
+
 def ja_vertical_long(path: Path):
     """Three vertical pages; paragraphs run on across page breaks."""
     doc = Document()
@@ -170,6 +204,7 @@ def ja_vertical_long(path: Path):
 SAMPLES = {
     "mixed_directions": mixed_directions,
     "ja_vertical_long": ja_vertical_long,
+    "zh_tw_pages": zh_tw_pages,
     "zh_tw_horizontal": zh_tw_horizontal,
     "ja_vertical_ruby": ja_vertical_ruby,
     "zh_cn_two_columns": zh_cn_two_columns,

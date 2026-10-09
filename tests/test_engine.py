@@ -48,6 +48,33 @@ def test_vertical_paragraphs_run_on_across_pages(samples, tmp_path):
     assert body_text(doc) == expected
 
 
+def page_starts(doc):
+    """Number of places where the Word file starts a new page."""
+    body = doc.element.body
+    breaks = body.findall(".//" + qn("w:pageBreakBefore"))
+    breaks += [br for br in body.iter(qn("w:br")) if br.get(qn("w:type")) == "page"]
+    return len(breaks)
+
+
+def test_pages_and_lines_follow_the_pdf(samples, tmp_path):
+    doc, _ = run(samples, tmp_path, "zh_tw_pages")
+    full = "天地玄黃宇宙洪荒日月盈昃辰宿列張寒來暑往秋收冬藏閏餘成歲律呂調陽雲騰致雨露結為霜"
+    paras = body_text(doc)
+    # Page 1 is one indented paragraph: the pieces of the gapped line stay in
+    # place, the short line keeps its line break, the hanging comma stays at
+    # its line start, and the paragraph runs on into page 2.
+    assert paras[0] == (full[:38] + "甲乙丙丁戊己庚辛壬癸子丑寅卯辰巳午未短行在這裡結束。\n,"
+                        + full + full + full[:20] + "第一頁的段落到此結束。")
+    assert paras[1:] == ["第二頁的新段落。", "第三頁的段落。"]
+    first = doc.paragraphs[0].paragraph_format
+    assert round(first.first_line_indent.pt) == 22
+    assert round(first.line_spacing.pt) == 18
+    # Each PDF page starts a Word page, with the PDF's margins.
+    assert page_starts(doc) == 2
+    section = doc.sections[0]
+    assert round(section.left_margin.pt) in (73, 77) and round(section.right_margin.pt) == 78
+
+
 def test_traditional_chinese_structure(samples, tmp_path):
     doc, summary = run(samples, tmp_path, "zh_tw_horizontal")
     assert summary["languages"][0] == "zh-TW"

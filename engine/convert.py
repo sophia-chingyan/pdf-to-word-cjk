@@ -16,7 +16,7 @@ import pymupdf
 from . import furigana
 from .cmaps import fix_unicode_cmaps
 from .extract import build_lines, page_chars
-from .layout import BULLETS, NUMBERED, group_blocks, reading_order, split_paragraphs
+from .layout import BULLETS, NUMBERED, block_edges, group_blocks, reading_order, split_paragraphs
 from .model import Line
 from .options import Options
 from .scripts import is_broken, needs_space
@@ -53,8 +53,11 @@ def _is_page_number(text: str) -> bool:
     return 0 < len(t) <= 4 and (t.isdigit() or t.lower().strip("ivxlc") == "")
 
 
-def _runs(lines: list[Line]) -> list[list]:
-    """Paragraph text as [text, bold] runs, with ruby readings in brackets."""
+def _runs(lines: list[Line], breaks: set[int] = frozenset()) -> list[list]:
+    """Paragraph text as [text, bold] runs, with ruby readings in brackets.
+
+    A line whose index is in ``breaks`` ends with a line break ("\n").
+    """
     runs: list[list] = []
 
     def put(text: str, bold: bool):
@@ -73,7 +76,11 @@ def _runs(lines: list[Line]) -> list[list]:
         chars = ln.chars
         text = ln.text
         if n:
-            if prev_text.endswith("-") and text[:1].isalpha() and prev_text[-2:-1].isalpha():
+            if n - 1 in breaks:
+                if runs:
+                    runs[-1][0] = runs[-1][0].rstrip(" ")
+                put("\n", False)
+            elif prev_text.endswith("-") and text[:1].isalpha() and prev_text[-2:-1].isalpha():
                 # "hyphen-\nated" -> "hyphenated"
                 if runs and runs[-1][0].endswith("-"):
                     runs[-1][0] = runs[-1][0][:-1]
@@ -88,6 +95,7 @@ def _runs(lines: list[Line]) -> list[list]:
     # letters and digits into a space; Word adds that gap by itself.
     for r in runs:
         r[0] = CJK_LATIN_SPACE.sub("", r[0])
+        r[0] = re.sub(r" *\n *", "\n", r[0])
     # Trim spaces at the ends, keep the ideographic indent.
     if runs:
         runs[0][0] = runs[0][0].lstrip(" ")
@@ -102,6 +110,18 @@ def _list_kind(text: str) -> str | None:
     if NUMBERED.match(t):
         return "number"
     return None
+
+
+def _pitch(block) -> float | None:
+    """Distance from one line (or column) to the next, in points."""
+    if len(block.lines) < 2:
+        return None
+    if block.dir == "h":
+        steps = [b.y0 - a.y0 for a, b in zip(block.lines, block.lines[1:])]
+    else:
+        steps = [a.x1 - b.x1 for a, b in zip(block.lines, block.lines[1:])]
+    steps = sorted(s for s in steps if s > 0)
+    return round(steps[len(steps) // 2], 1) if steps else None
 
 
 def _image_png(doc, xref: int) -> bytes | None:
@@ -160,13 +180,16 @@ def analyze_page(doc, index: int, options: Options, workdir: Path) -> dict:
     regions: list[dict] = []
     for b in blocks:
         paragraphs = []
-        x0, y0, x1, y1 = b.bbox
-        b_start, b_end = (x0, x1) if b.dir == "h" else (y0, y1)
+        b_start, b_end = block_edges(b)
         for para in split_paragraphs(b):
-            runs = _runs(para)
+            # Short lines inside a paragraph keep their line break, so the
+            # page reads line for line like the PDF.
+            breaks = {i for i, ln in enumerate(para[:-1]) if ln.end < b_end - 1.5 * ln.size}
+            runs = _runs(para, breaks)
             text = "".join(r[0] for r in runs)
             if not text.strip():
                 continue
+            first = para[0]
             paragraphs.append({
                 "runs": runs,
                 "size": round(sum(ln.size for ln in para) / len(para), 1),
@@ -176,8 +199,12 @@ def analyze_page(doc, index: int, options: Options, workdir: Path) -> dict:
                 # column or page: it fills its last line and the next one
                 # starts flush, without an indent.
                 "open_end": len(b.lines) > 1 and para[-1].end >= b_end - 1.5 * para[-1].size,
-                "indent": para[0].text.startswith(("\u3000", " "))
-                or para[0].start > b_start + 0.8 * para[0].size,
+                "indent": first.text.startswith(("\u3000", " "))
+                or first.start > b_start + 0.8 * first.size,
+                # First-line indent in points, when it is drawn as space
+                # rather than typed as ideographic spaces.
+                "indent_pt": round(first.start - b_start, 1)
+                if not first.text.startswith(("\u3000", " ")) and first.start > b_start + 0.8 * first.size else 0,
             })
         if not paragraphs:
             continue
@@ -187,6 +214,7 @@ def analyze_page(doc, index: int, options: Options, workdir: Path) -> dict:
             "type": "text",
             "dir": forced or b.dir,
             "bbox": list(b.bbox),
+            "pitch": _pitch(b),
             "paragraphs": paragraphs,
             "sans": any(k in top_font for k in SANS_HINTS),
             "text": "".join(r[0] for p in paragraphs for r in p["runs"]),
