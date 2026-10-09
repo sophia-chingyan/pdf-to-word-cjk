@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block nav_library %}active{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="lib-head">
+    <h2>檔案庫</h2>
+    <span class="muted small" id="storage"></span>
+  </div>
+  <div class="lib-tools">
+    <label><input type="checkbox" id="select-all"> 全選</label>
+    <span class="muted small" id="selection">已選 0 個</span>
+    <button class="btn danger small" id="delete-selected" hidden>刪除所選</button>
+    <button class="btn small" id="delete-all">全部刪除</button>
+  </div>
+  <div id="library"><p class="muted">還沒有轉換紀錄。</p></div>
+</section>
+
+<dialog id="confirm">
+  <form method="dialog">
+    <p id="confirm-text"></p>
+    <div class="row-actions">
+      <button class="btn" value="cancel">取消</button>
+      <button class="btn danger" value="ok">刪除</button>
+    </div>
+  </form>
+</dialog>
+{% endblock %}
+{% block scripts %}<script>initLibraryPage({{ "true" if backup else "false" }});</script>{% endblock %}

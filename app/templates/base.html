@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}PDF 轉 Word{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  {% block nav %}
+  <header class="top">
+    <a class="brand" href="/">PDF 轉 Word</a>
+    <nav>
+      <a href="/" class="{% block nav_convert %}{% endblock %}">轉換</a>
+      <a href="/library" class="{% block nav_library %}{% endblock %}">檔案庫</a>
+      <a href="/logout">登出</a>
+    </nav>
+  </header>
+  {% endblock %}
+  <main class="wrap">{% block content %}{% endblock %}</main>
+  <div class="toast" id="toast"></div>
+  <script src="/static/app.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

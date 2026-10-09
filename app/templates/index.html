@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block nav_convert %}active{% endblock %}
+{% block content %}
+<section class="card">
+  <h2>上傳 PDF</h2>
+  <label class="drop" id="drop">
+    <input type="file" id="file-input" accept=".pdf,application/pdf" multiple>
+    <span><strong>拖放 PDF 到這裡</strong>，或點一下選擇檔案</span>
+    <span class="muted">每個檔案最多 {{ max_mb }} MB、{{ max_pages }} 頁 · 僅支援可選取文字的 PDF</span>
+  </label>
+</section>
+
+<section class="card" id="settings-card" hidden>
+  <h2>內容設定</h2>
+  <p class="muted">選擇 PDF 的語言與文字方向，轉換會依照你的選擇進行。可複選。</p>
+  <div class="picker" id="lang-picker">
+    {% for value, label in labels.items() %}
+    <label><input type="checkbox" value="{{ value }}"> {{ label }}</label>
+    {% endfor %}
+  </div>
+  <div class="picker" id="furigana-picker" hidden>
+    <span class="field">日文注音假名（振假名）：</span>
+    <label><input type="radio" name="furigana" value="brackets" checked> 放在括號內，例如 漢字(かんじ)</label>
+    <label><input type="radio" name="furigana" value="drop"> 移除</label>
+  </div>
+  <div id="waiting"></div>
+  <div class="row-actions"><button class="btn primary" id="start-all">全部開始轉換</button></div>
+</section>
+
+<section class="card">
+  <h2>轉換進度</h2>
+  <div id="jobs"><p class="muted">目前沒有轉換中的檔案。</p></div>
+  <p class="muted small">可以關閉這個頁面，完成的檔案會出現在<a href="/library">檔案庫</a>。</p>
+</section>
+{% endblock %}
+{% block scripts %}<script>initConvertPage();</script>{% endblock %}
