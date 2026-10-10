@@ -59,17 +59,39 @@ def is_list_start(text: str) -> bool:
     return bool(t) and (t[0] in BULLETS and len(t) > 1 or bool(NUMBERED.match(t)))
 
 
+ENDS_SENTENCE = "。．.！!？?」』）)…：:"
+
+
+def block_edges(block: Block) -> tuple[float, float]:
+    """Where the block's lines start and where a full line ends.
+
+    Unjustified text (ReportLab, plain-text exports) leaves full lines a
+    character or two apart, and hanging punctuation reaches past the
+    margin, so a full line is one that reaches the usual end, not the
+    furthest one.
+    """
+    ends = sorted(ln.end for ln in block.lines)
+    return min(ln.start for ln in block.lines), ends[(3 * (len(ends) - 1)) // 4]
+
+
+def ends_short(line: Line, b_end: float) -> bool:
+    """A line that stops before the block's usual end: the last line of a paragraph.
+    A shortfall of a few characters only counts after the end of a sentence."""
+    short = b_end - line.end
+    s = line.size
+    return short > 3.5 * s or short > 1.5 * s and line.text.rstrip()[-1:] in ENDS_SENTENCE
+
+
 def split_paragraphs(block: Block) -> list[list[Line]]:
     """Split a block into paragraphs using short last lines and indents."""
-    x0, y0, x1, y1 = block.bbox
-    b_start, b_end = (x0, x1) if block.dir == "h" else (y0, y1)
+    b_start, b_end = block_edges(block)
     paragraphs: list[list[Line]] = []
     for i, ln in enumerate(block.lines):
         s = ln.size
         new = i == 0
         if not new:
             prev = block.lines[i - 1]
-            if prev.end < b_end - 1.5 * s:
+            if ends_short(prev, b_end):
                 new = True
             elif ln.start > b_start + 0.8 * s or ln.text.startswith("　"):
                 new = True

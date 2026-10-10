@@ -33,11 +33,13 @@ Word XML with python-docx.
    Unicode they contain, even when the font's character collection doesn't match the encoding.
 2. **Rebuild lines and columns.** PDF tools usually store vertical text as many tiny horizontal
    fragments, so columns are rebuilt from where the characters sit. Sideways Latin letters and
-   digits inside vertical text are kept in their column.
+   digits inside vertical text are kept in their column, and so is punctuation that a generator
+   (ReportLab) draws shifted into the next cell.
 3. **Furigana.** Small kana right beside Kanji (above it in horizontal text, to its right in
    vertical text) is attached to that Kanji and written as `漢字(かんじ)`, or dropped.
 4. **Blocks, paragraphs, reading order.** Lines of the same size and direction become blocks;
-   indents and short last lines split paragraphs. A recursive XY-cut orders the blocks: columns
+   indents and short last lines split paragraphs (measured against the usual line length, so
+   unjustified text with lines a character or two apart stays together). A recursive XY-cut orders the blocks: columns
    left to right on horizontal pages, right to left on vertical pages. A paragraph that runs on
    into the next column or page is joined back together.
 5. **Structure.** Headings come from font size (up to 3 levels), bullet lists are detected,
