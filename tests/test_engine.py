@@ -179,3 +179,41 @@ def test_unicode_cmap_vertical(tmp_path):
     text = "".join(body_text(Document(out)))
     assert "".join(lines) in text
     assert summary["directions"] == ["v"]
+
+
+
+def reportlab_vertical_pdf(path, columns, size=12.0):
+    """Vertical text laid out the way ReportLab does it: one character per
+    text object, full-width punctuation drawn shifted up and right into the
+    cell before it, Latin turned sideways with its own advance, and columns
+    that are not justified."""
+    pdf = pymupdf.open()
+    page = pdf.new_page(width=420, height=595)
+    for n, col in enumerate(columns):
+        x = 360 - 21 * n
+        y = 60 + (2 * size if n == 0 else 0)  # the first column is indented
+        for ch in col:
+            if ch.isascii():
+                # Sideways: turned a quarter turn, advancing by its own width.
+                page.insert_text((x + 0.2 * size, y), ch, fontname="helv", fontsize=size, rotate=-90)
+                y += pymupdf.get_text_length(ch, "helv", size)
+                continue
+            shift = 0.45 * size if ch in "，。、）" else 0
+            page.insert_text((x + 0.4 * shift, y + 0.88 * size - shift), ch, fontname="china-t", fontsize=size)
+            y += size
+    pdf.save(path)
+    return path
+
+
+def test_reportlab_vertical_punctuation(tmp_path):
+    # Offset punctuation, sideways Latin and unjustified columns must not
+    # break the columns or the paragraph.
+    columns = ["字句，無論是發聲說出來，或是沒有說出來，而只是思想的形式存在，都會在你身",
+               "上投下一個魔咒。你的本質(who you are),在這裡被簡約,而與一個聲",
+               "音混淆在一塊兒了。這是石頭（當然一朵花），都能為你展示回歸神的道路",
+               "與它們的源頭。"]
+    src = reportlab_vertical_pdf(tmp_path / "in.pdf", columns)
+    out = tmp_path / "out.docx"
+    summary = convert(src, out, Options.from_dict(None), tmp_path / "work")
+    assert body_text(Document(out)) == ["".join(columns)]
+    assert summary["directions"] == ["v"]

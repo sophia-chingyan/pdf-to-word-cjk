@@ -16,7 +16,7 @@ import pymupdf
 from . import furigana
 from .cmaps import fix_unicode_cmaps
 from .extract import build_lines, page_chars
-from .layout import BULLETS, NUMBERED, group_blocks, reading_order, split_paragraphs
+from .layout import BULLETS, NUMBERED, block_edges, ends_short, group_blocks, reading_order, split_paragraphs
 from .model import Line
 from .options import Options
 from .scripts import is_broken, needs_space
@@ -160,8 +160,7 @@ def analyze_page(doc, index: int, options: Options, workdir: Path) -> dict:
     regions: list[dict] = []
     for b in blocks:
         paragraphs = []
-        x0, y0, x1, y1 = b.bbox
-        b_start, b_end = (x0, x1) if b.dir == "h" else (y0, y1)
+        b_start, b_end = block_edges(b)
         for para in split_paragraphs(b):
             runs = _runs(para)
             text = "".join(r[0] for r in runs)
@@ -175,7 +174,7 @@ def analyze_page(doc, index: int, options: Options, workdir: Path) -> dict:
                 # Used to rejoin a paragraph that runs on into the next
                 # column or page: it fills its last line and the next one
                 # starts flush, without an indent.
-                "open_end": len(b.lines) > 1 and para[-1].end >= b_end - 1.5 * para[-1].size,
+                "open_end": len(b.lines) > 1 and not ends_short(para[-1], b_end),
                 "indent": para[0].text.startswith(("\u3000", " "))
                 or para[0].start > b_start + 0.8 * para[0].size,
             })
